@@ -706,25 +706,41 @@
   // Send frame to backend
   async function sendToBackend(frameBlob) {
     try {
+      console.log('[Shop the Frame] Calling sendToBackground...');
       const data = await sendToBackground(frameBlob);
 
-      console.log('[Shop the Frame] Received data:', JSON.stringify(data).slice(0, 500));
-      console.log('[Shop the Frame] data.results:', data?.results?.length, 'items');
+      console.log('[Shop the Frame] === RESPONSE DEBUG ===');
+      console.log('[Shop the Frame] Raw data:', data);
+      console.log('[Shop the Frame] data type:', typeof data);
+      console.log('[Shop the Frame] data.results:', data?.results);
+      console.log('[Shop the Frame] data.results length:', data?.results?.length);
+      console.log('[Shop the Frame] data.frameItems:', data?.frameItems);
+      
+      if (data?.results?.[0]) {
+        console.log('[Shop the Frame] First result:', data.results[0]);
+        console.log('[Shop the Frame] First result products:', data.results[0].products);
+        console.log('[Shop the Frame] First result products length:', data.results[0].products?.length);
+      }
 
       // Process response
       currentResults = Array.isArray(data.results) ? data.results : [];
+      console.log('[Shop the Frame] currentResults set to:', currentResults.length, 'groups');
 
       if (currentResults.length) {
         detectedItems = currentResults.map((group, index) => ({
           item: group.item?.query || group.item?.item || `Item ${index + 1}`
         }));
+        console.log('[Shop the Frame] detectedItems from results:', detectedItems);
       } else if (Array.isArray(data.frameItems)) {
         detectedItems = data.frameItems;
+        console.log('[Shop the Frame] detectedItems from frameItems:', detectedItems);
       } else if (Array.isArray(data.detectedItems)) {
         detectedItems = data.detectedItems;
+        console.log('[Shop the Frame] detectedItems from detectedItems:', detectedItems);
       } else {
         // Generate detected items from products if not provided
         detectedItems = extractItemsFromProducts(data.products || []);
+        console.log('[Shop the Frame] detectedItems extracted:', detectedItems);
       }
 
       currentProducts = data.products || [];
@@ -741,10 +757,15 @@
         ? countProductsFromResults(currentResults)
         : currentProducts.length;
 
+      console.log('[Shop the Frame] totalCount:', totalCount);
+      console.log('[Shop the Frame] sections:', sections);
+
       if (totalCount === 0) {
         viewState = 'empty';
+        console.log('[Shop the Frame] Setting viewState to EMPTY');
       } else {
         viewState = 'results';
+        console.log('[Shop the Frame] Setting viewState to RESULTS');
       }
 
       updateCTAButton();
@@ -752,6 +773,7 @@
 
     } catch (error) {
       console.error('[Shop the Frame] API Error:', error);
+      console.error('[Shop the Frame] Error stack:', error.stack);
 
       // For demo: show placeholder products on network error
       if (error.message.includes('Failed to fetch')) {
@@ -771,26 +793,29 @@
     }
 
     return new Promise((resolve, reject) => {
-      frameBlob.arrayBuffer()
-        .then((buffer) => {
-          chrome.runtime.sendMessage({
-            type: 'shopFrame',
-            image: buffer,
-            filename: 'frame.jpg',
-            mimeType: frameBlob.type || 'image/jpeg'
-          }, (response) => {
-            if (chrome.runtime.lastError) {
-              reject(new Error(chrome.runtime.lastError.message));
-              return;
-            }
-            if (!response || !response.ok) {
-              reject(new Error(response?.error || 'Request failed'));
-              return;
-            }
-            resolve(response.data);
-          });
-        })
-        .catch(reject);
+      // Convert blob to base64 for message passing (ArrayBuffer can't be serialized)
+      const reader = new FileReader();
+      reader.onload = () => {
+        const base64 = reader.result.split(',')[1]; // Remove data:image/...;base64, prefix
+        chrome.runtime.sendMessage({
+          type: 'shopFrame',
+          imageBase64: base64,
+          filename: 'frame.jpg',
+          mimeType: frameBlob.type || 'image/jpeg'
+        }, (response) => {
+          if (chrome.runtime.lastError) {
+            reject(new Error(chrome.runtime.lastError.message));
+            return;
+          }
+          if (!response || !response.ok) {
+            reject(new Error(response?.error || 'Request failed'));
+            return;
+          }
+          resolve(response.data);
+        });
+      };
+      reader.onerror = () => reject(new Error('Failed to read image'));
+      reader.readAsDataURL(frameBlob);
     });
   }
 
