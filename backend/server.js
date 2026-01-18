@@ -17,6 +17,7 @@ import {
 } from './analytics/boost.js';
 import { connectMongo } from './db/mongo.js';
 import { Session } from './models/Session.js';
+import { Event } from './models/Event.js';
 
 dotenv.config();
 
@@ -235,6 +236,108 @@ app.post('/track', (req, res) => {
 
   track(eventName, userId, eventProps, userProps);
   res.json({ ok: true });
+});
+
+// GET /insights - lightweight analytics for merchants (last 7 days)
+app.get('/insights', async (req, res) => {
+  const since = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+  const limit = 10;
+
+  try {
+    const [
+      topDetectedCategories,
+      topClickedCategories,
+      topItemQueries,
+      ctrByCategory,
+      latencyStats,
+    ] = await Promise.all([
+      Event.aggregate([
+        { $match: { type: 'item_impression', createdAt: { $gte: since }, itemCategory: { $exists: true, $ne: null } } },
+        { $group: { _id: '$itemCategory', count: { $sum: 1 } } },
+        { $sort: { count: -1 } },
+        { $limit: limit },
+      ]),
+      Event.aggregate([
+        { $match: { type: 'product_click', createdAt: { $gte: since }, itemCategory: { $exists: true, $ne: null } } },
+        { $group: { _id: '$itemCategory', count: { $sum: 1 } } },
+        { $sort: { count: -1 } },
+        { $limit: limit },
+      ]),
+      Session.aggregate([
+        { $match: { createdAt: { $gte: since } } },
+        { $unwind: '$results' },
+        { $match: { 'results.item.query': { $exists: true, $ne: '' } } },
+        { $group: { _id: '$results.item.query', count: { $sum: 1 } } },
+        { $sort: { count: -1 } },
+        { $limit: limit },
+      ]),
+      Event.aggregate([
+        { $match: { createdAt: { $gte: since }, itemCategory: { $exists: true, $ne: null } } },
+        {
+          $group: {
+            _id: '$itemCategory',
+            impressions: { $sum: { $cond: [{ $eq: ['$type', 'item_impression'] }, 1, 0] } },
+            clicks: { $sum: { $cond: [{ $eq: ['$type', 'product_click'] }, 1, 0] } },
+          },
+        },
+        {
+          $project: {
+            _id: 0,
+            category: '$_id',
+            impressions: 1,
+            clicks: 1,
+            ctr: {
+              $cond: [
+                { $gt: ['$impressions', 0] },
+                { $divide: ['$clicks', '$impressions'] },
+                0,
+              ],
+            },
+          },
+        },
+        { $sort: { ctr: -1 } },
+        { $limit: limit },
+      ]),
+      Event.aggregate([
+        { $match: { type: 'shop_frame_latency', createdAt: { $gte: since }, latencyMs: { $type: 'number' } } },
+        {
+          $group: {
+            _id: null,
+            p50: { $percentile: { input: '$latencyMs', p: [0.5], method: 'approximate' } },
+            p95: { $percentile: { input: '$latencyMs', p: [0.95], method: 'approximate' } },
+          },
+        },
+        {
+          $project: {
+            _id: 0,
+            p50: { $arrayElemAt: ['$p50', 0] },
+            p95: { $arrayElemAt: ['$p95', 0] },
+          },
+        },
+      ]),
+    ]);
+
+    res.json({
+      windowDays: 7,
+      topDetectedCategories: topDetectedCategories.map((entry) => ({
+        category: entry._id,
+        count: entry.count,
+      })),
+      topClickedCategories: topClickedCategories.map((entry) => ({
+        category: entry._id,
+        count: entry.count,
+      })),
+      topItemQueries: topItemQueries.map((entry) => ({
+        query: entry._id,
+        count: entry.count,
+      })),
+      ctrByCategory,
+      latencyStats: latencyStats[0] || { p50: null, p95: null },
+    });
+  } catch (error) {
+    console.error('Insights error:', error);
+    res.status(500).json({ ok: false, error: 'Failed to load insights' });
+  }
 });
 
 // Error handling middleware
