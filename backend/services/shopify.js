@@ -1,18 +1,46 @@
 // Shopify Catalog API service
-// TODO: Replace with actual Shopify MCP endpoint
+// Uses catalogClient for real API calls, falls back to mock for demo
 
-const SHOPIFY_API_URL = process.env.SHOPIFY_API_URL || 'https://your-shopify-mcp-endpoint.com';
+import { searchProducts } from './catalogClient.js';
+
+const USE_MOCK = process.env.SHOPIFY_USE_MOCK === 'true' ||
+  (!process.env.SHOPIFY_CLIENT_ID || !process.env.SHOPIFY_CLIENT_SECRET);
 
 export async function searchShopifyCatalog(query, limit = 5) {
-  console.log(`[Shopify] Searching: "${query}" (limit: ${limit})`);
+  if (USE_MOCK) {
+    console.log(`[Shopify] Using mock data (set SHOPIFY_CLIENT_ID/SECRET to use real API)`);
+    return searchMock(query, limit);
+  }
 
-  // TODO: Replace with actual Shopify Catalog API call
-  // For now, return mock data for demo
+  try {
+    const products = await searchProducts(query, limit);
+
+    // Transform to expected format
+    return {
+      query,
+      products: products.map(p => ({
+        id: p.id,
+        title: p.title,
+        vendor: p.vendor,
+        price: p.min_price,
+        priceMax: p.max_price,
+        image: p.image_url,
+        url: p.product_url,
+      })),
+    };
+  } catch (error) {
+    console.error(`[Shopify] API error, falling back to mock:`, error.message);
+    return searchMock(query, limit);
+  }
+}
+
+// Mock implementation for demo/development
+async function searchMock(query, limit) {
+  console.log(`[Shopify] Mock search: "${query}" (limit: ${limit})`);
 
   // Simulate API delay
   await new Promise(resolve => setTimeout(resolve, 100));
 
-  // Mock products based on query
   const mockProducts = generateMockProducts(query, limit);
 
   return {
