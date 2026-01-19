@@ -26,6 +26,7 @@ const __dirname = path.dirname(__filename);
 
 const app = express();
 const PORT = process.env.PORT || 3000;
+const USE_MONGO = process.env.USE_MONGO !== 'false';
 
 // CORS configuration - allow all origins for development
 // This is needed because:
@@ -110,10 +111,12 @@ app.post('/shop-frame', upload.single('frame'), async (req, res) => {
       .createHash('sha256')
       .update(imageBuffer)
       .digest('hex');
-    const cachedSession = await Session.findOne({
-      frameHash,
-      createdAt: { $gte: cacheCutoff },
-    }).sort({ createdAt: -1 });
+    const cachedSession = USE_MONGO
+      ? await Session.findOne({
+        frameHash,
+        createdAt: { $gte: cacheCutoff },
+      }).sort({ createdAt: -1 })
+      : null;
 
     if (cachedSession) {
       console.log(`[Cache] hit for frameHash=${frameHash}`);
@@ -162,9 +165,11 @@ app.post('/shop-frame', upload.single('frame'), async (req, res) => {
       results: result.results || [],
     };
 
-    Session.create(sessionPayload).catch((error) => {
-      console.error('[MongoDB] Failed to store session:', error);
-    });
+    if (USE_MONGO) {
+      Session.create(sessionPayload).catch((error) => {
+        console.error('[MongoDB] Failed to store session:', error);
+      });
+    }
 
     const boostedResult = applyBoostsToResults(result, boosts);
 
@@ -362,13 +367,20 @@ app.use((err, req, res, next) => {
   });
 });
 
-connectMongo()
-  .then(() => {
-    app.listen(PORT, () => {
-      console.log(`Server running on http://localhost:${PORT}`);
-    });
-  })
-  .catch((error) => {
-    console.error('Failed to start server:', error);
-    process.exit(1);
+if (!USE_MONGO) {
+  console.log('[MongoDB] disabled via USE_MONGO=false');
+  app.listen(PORT, () => {
+    console.log(`Server running on http://localhost:${PORT}`);
   });
+} else {
+  connectMongo()
+    .then(() => {
+      app.listen(PORT, () => {
+        console.log(`Server running on http://localhost:${PORT}`);
+      });
+    })
+    .catch((error) => {
+      console.error('Failed to start server:', error);
+      process.exit(1);
+    });
+}

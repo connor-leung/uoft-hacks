@@ -2,6 +2,7 @@ import { AnalyticsEvent } from '../models/AnalyticsEvent.js';
 
 const LOOKBACK_DAYS = 30;
 const MIN_IMPRESSIONS = 5;
+const USE_MONGO = process.env.USE_MONGO !== 'false';
 
 function computeBoost(clicks, impressions) {
   if (!impressions || impressions < MIN_IMPRESSIONS) return 1;
@@ -18,6 +19,9 @@ function buildBoostMap(rows) {
 }
 
 export async function getBoostScores() {
+  if (!USE_MONGO) {
+    return { categoryBoosts: {}, queryBoosts: {}, boostsByKey: {} };
+  }
   const since = new Date(Date.now() - LOOKBACK_DAYS * 24 * 60 * 60 * 1000);
 
   const categoryRows = await AnalyticsEvent.aggregate([
@@ -116,6 +120,7 @@ export function logBoosts(boosts) {
 }
 
 export async function recordImpressions({ userId, requestId, frameItems, results }) {
+  if (!USE_MONGO) return;
   const docs = [];
   const now = new Date();
 
@@ -144,6 +149,7 @@ export async function recordImpressions({ userId, requestId, frameItems, results
 }
 
 export async function recordClick({ userId, requestId, category, query, productId, productUrl }) {
+  if (!USE_MONGO) return;
   await AnalyticsEvent.create({
     type: 'click',
     category,

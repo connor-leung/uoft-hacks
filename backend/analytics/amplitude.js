@@ -6,6 +6,7 @@ const BASE_DELAY_MS = 200;
 let isInitialized = false;
 
 function ensureInit() {
+  if (process.env.USE_AMPLITUDE === 'false') return false;
   if (isInitialized) return true;
   const apiKey = process.env.AMPLITUDE_API_KEY;
   if (!apiKey) return false;
