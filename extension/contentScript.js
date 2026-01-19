@@ -398,6 +398,10 @@
     }
 
     try {
+      if (!video.paused) {
+        video.pause();
+      }
+
       // Capture the frame
       const frameBlob = await captureFrame(video);
       currentFrameBlob = frameBlob;
