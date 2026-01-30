@@ -68,7 +68,8 @@
   function createButton() {
     button = document.createElement('button');
     button.id = 'shop-frame-btn';
-    button.innerHTML = `${icons.shoppingBag} Shop this frame`;
+    button.innerHTML = icons.shoppingBag;
+    button.setAttribute('aria-label', 'Shop this frame');
     button.addEventListener('click', handleShopClick);
     document.body.appendChild(button);
   }
@@ -105,17 +106,6 @@
         </button>
       </div>
       <div class="panel-content">
-        <div class="frame-preview">
-          <div class="frame-preview-container">
-            <img id="frame-thumbnail" src="" alt="Captured frame"/>
-            <div class="frame-timestamp" id="frame-timestamp">Frame at 00:00</div>
-          </div>
-        </div>
-        <div class="cta-section">
-          <button class="shop-frame-cta" id="shop-cta-btn">
-            Shop this frame
-          </button>
-        </div>
         <div id="dynamic-content"></div>
       </div>
     `;
@@ -408,7 +398,7 @@
       currentTimestamp = formatVideoTime(video.currentTime);
 
       // Show the panel with preview
-      showPanel(frameBlob);
+      showPanel();
 
       await startAnalysis();
 
@@ -683,17 +673,7 @@
   }
 
   // Show the side panel
-  function showPanel(frameBlob) {
-    const thumbnail = panel.querySelector('#frame-thumbnail');
-    const timestampEl = panel.querySelector('#frame-timestamp');
-
-    if (thumbnail) {
-      thumbnail.src = URL.createObjectURL(frameBlob);
-    }
-    if (timestampEl) {
-      timestampEl.textContent = `Frame at ${currentTimestamp}`;
-    }
-
+  function showPanel() {
     // Attach CTA event listener
     const ctaBtn = panel.querySelector('#shop-cta-btn');
     if (ctaBtn) {
