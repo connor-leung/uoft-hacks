@@ -6,7 +6,6 @@
 
   // State
   let panel = null;
-  let button = null;
   let currentFrameBlob = null;
   let currentTimestamp = '00:00';
   let detectedItems = [];
@@ -16,6 +15,8 @@
   let viewState = 'idle'; // idle, loading, results, error, empty
   let expandedSections = new Set();
   let sidebarObserver = null;
+  let watchedVideo = null;
+  let lastAutoScanTime = null;
 
   // ============================================
   // SVG Icons
@@ -55,10 +56,9 @@
   // Initialize Extension
   // ============================================
   function init() {
-    if (!button || !document.getElementById('shop-frame-btn')) {
-      createButton();
-    } else {
-      button = document.getElementById('shop-frame-btn');
+    const existingButton = document.getElementById('shop-frame-btn');
+    if (existingButton) {
+      existingButton.remove();
     }
 
     if (!panel || !document.getElementById('shop-frame-panel')) {
@@ -70,6 +70,7 @@
 
     mountPanelInSidebar();
     panel.classList.add('open');
+    attachPauseTrigger();
 
     console.log('[Shop the Frame] Extension initialized');
   }
@@ -119,16 +120,37 @@
     sidebarObserver.observe(sidebar, { childList: true });
   }
 
-  // ============================================
-  // Create Floating Button
-  // ============================================
-  function createButton() {
-    button = document.createElement('button');
-    button.id = 'shop-frame-btn';
-    button.innerHTML = icons.shoppingBag;
-    button.setAttribute('aria-label', 'Shop this frame');
-    button.addEventListener('click', handleShopClick);
-    document.body.appendChild(button);
+  function attachPauseTrigger(retries = 10) {
+    const video = document.querySelector('video');
+
+    if (!video) {
+      if (retries > 0) {
+        setTimeout(() => attachPauseTrigger(retries - 1), 400);
+      }
+      return;
+    }
+
+    if (watchedVideo && watchedVideo !== video) {
+      watchedVideo.removeEventListener('pause', handleVideoPause);
+    }
+
+    if (watchedVideo !== video) {
+      watchedVideo = video;
+      watchedVideo.addEventListener('pause', handleVideoPause);
+    }
+  }
+
+  async function handleVideoPause() {
+    const video = watchedVideo || document.querySelector('video');
+    if (!video) return;
+
+    const roundedTime = Number(video.currentTime.toFixed(2));
+    if (lastAutoScanTime !== null && Math.abs(lastAutoScanTime - roundedTime) < 0.2) {
+      return;
+    }
+
+    lastAutoScanTime = roundedTime;
+    await scanVideoFrame(video);
   }
 
   // ============================================
@@ -156,7 +178,6 @@
             ${icons.shoppingBag}
             <h2>Shop the Frame</h2>
           </div>
-          <p class="panel-header-subtitle">Powered by Gemini + Shopify</p>
         </div>
         <button class="close-btn" aria-label="Close panel">
           ${icons.close}
@@ -211,7 +232,6 @@
 
     return `
       <div class="detected-items-section">
-        <h3 class="section-title">Detected items</h3>
         <div class="item-chips-container">
           ${chips}
         </div>
@@ -444,21 +464,21 @@
       return;
     }
 
-    try {
-      if (!video.paused) {
-        video.pause();
-      }
+    if (!video.paused) {
+      video.pause();
+      return;
+    }
 
-      // Capture the frame
+    await scanVideoFrame(video);
+  }
+
+  async function scanVideoFrame(video) {
+    try {
       const frameBlob = await captureFrame(video);
       currentFrameBlob = frameBlob;
       currentTimestamp = formatVideoTime(video.currentTime);
-
-      // Show the panel with preview
       showPanel();
-
       await startAnalysis();
-
     } catch (error) {
       console.error('[Shop the Frame] Error:', error);
       alert('Failed to capture frame: ' + error.message);
@@ -958,8 +978,11 @@
     if (location.href !== lastUrl) {
       lastUrl = location.href;
       if (location.href.includes('youtube.com/watch')) {
+        watchedVideo = null;
+        lastAutoScanTime = null;
         setTimeout(init, 1000);
         setTimeout(() => mountPanelInSidebar(), 1200);
+        setTimeout(() => attachPauseTrigger(), 1200);
       }
     }
   }).observe(document.body, { subtree: true, childList: true });
