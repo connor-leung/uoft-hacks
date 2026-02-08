@@ -561,7 +561,9 @@
       const sectionEl = panel.querySelector(`.product-section[data-section="${sectionId}"]`);
       const scrollContainer = panel.querySelector('.panel-content');
       if (sectionEl && scrollContainer) {
-        const targetTop = sectionEl.offsetTop - 8;
+        const sectionRect = sectionEl.getBoundingClientRect();
+        const containerRect = scrollContainer.getBoundingClientRect();
+        const targetTop = scrollContainer.scrollTop + (sectionRect.top - containerRect.top) - 8;
         scrollContainer.scrollTo({
           top: Math.max(targetTop, 0),
           behavior: 'smooth'
