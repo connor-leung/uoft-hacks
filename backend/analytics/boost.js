@@ -1,8 +1,13 @@
-import { AnalyticsEvent } from '../models/AnalyticsEvent.js';
+import {
+  insertAnalyticsClick,
+  insertAnalyticsImpressions,
+  listCategoryBoostRows,
+  listQueryBoostRows,
+} from '../db/repositories.js';
 
 const LOOKBACK_DAYS = 30;
 const MIN_IMPRESSIONS = 5;
-const USE_MONGO = process.env.USE_MONGO !== 'false';
+const USE_POSTGRES = process.env.USE_POSTGRES !== 'false';
 
 function computeBoost(clicks, impressions) {
   if (!impressions || impressions < MIN_IMPRESSIONS) return 1;
@@ -13,42 +18,19 @@ function computeBoost(clicks, impressions) {
 function buildBoostMap(rows) {
   const boosts = {};
   for (const row of rows) {
-    boosts[row._id] = computeBoost(row.clicks, row.impressions);
+    boosts[row.key] = computeBoost(Number(row.clicks), Number(row.impressions));
   }
   return boosts;
 }
 
 export async function getBoostScores() {
-  if (!USE_MONGO) {
+  if (!USE_POSTGRES) {
     return { categoryBoosts: {}, queryBoosts: {}, boostsByKey: {} };
   }
   const since = new Date(Date.now() - LOOKBACK_DAYS * 24 * 60 * 60 * 1000);
 
-  const categoryRows = await AnalyticsEvent.aggregate([
-    { $match: { ts: { $gte: since }, category: { $exists: true } } },
-    {
-      $group: {
-        _id: '$category',
-        impressions: {
-          $sum: { $cond: [{ $eq: ['$type', 'impression'] }, 1, 0] },
-        },
-        clicks: { $sum: { $cond: [{ $eq: ['$type', 'click'] }, 1, 0] } },
-      },
-    },
-  ]);
-
-  const queryRows = await AnalyticsEvent.aggregate([
-    { $match: { ts: { $gte: since }, query: { $exists: true } } },
-    {
-      $group: {
-        _id: '$query',
-        impressions: {
-          $sum: { $cond: [{ $eq: ['$type', 'impression'] }, 1, 0] },
-        },
-        clicks: { $sum: { $cond: [{ $eq: ['$type', 'click'] }, 1, 0] } },
-      },
-    },
-  ]);
+  const categoryRows = await listCategoryBoostRows(since);
+  const queryRows = await listQueryBoostRows(since);
 
   const categoryBoosts = buildBoostMap(categoryRows);
   const queryBoosts = buildBoostMap(queryRows);
@@ -120,7 +102,7 @@ export function logBoosts(boosts) {
 }
 
 export async function recordImpressions({ userId, requestId, frameItems, results }) {
-  if (!USE_MONGO) return;
+  if (!USE_POSTGRES) return;
   const docs = [];
   const now = new Date();
 
@@ -144,13 +126,13 @@ export async function recordImpressions({ userId, requestId, frameItems, results
   });
 
   if (docs.length) {
-    await AnalyticsEvent.insertMany(docs, { ordered: false });
+    await insertAnalyticsImpressions(docs);
   }
 }
 
 export async function recordClick({ userId, requestId, category, query, productId, productUrl }) {
-  if (!USE_MONGO) return;
-  await AnalyticsEvent.create({
+  if (!USE_POSTGRES) return;
+  await insertAnalyticsClick({
     type: 'click',
     category,
     query,

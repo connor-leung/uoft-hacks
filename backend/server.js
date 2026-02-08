@@ -15,9 +15,8 @@ import {
   recordClick,
   recordImpressions,
 } from './analytics/boost.js';
-import { connectMongo } from './db/mongo.js';
-import { Session } from './models/Session.js';
-import { Event } from './models/Event.js';
+import { connectPostgres } from './db/postgres.js';
+import { createSession, findRecentSessionByFrameHash, getInsights } from './db/repositories.js';
 
 dotenv.config();
 
@@ -26,7 +25,7 @@ const __dirname = path.dirname(__filename);
 
 const app = express();
 const PORT = process.env.PORT || 3000;
-const USE_MONGO = process.env.USE_MONGO !== 'false';
+const USE_POSTGRES = process.env.USE_POSTGRES !== 'false';
 
 // CORS configuration - allow all origins for development
 // This is needed because:
@@ -111,11 +110,8 @@ app.post('/shop-frame', upload.single('frame'), async (req, res) => {
       .createHash('sha256')
       .update(imageBuffer)
       .digest('hex');
-    const cachedSession = USE_MONGO
-      ? await Session.findOne({
-        frameHash,
-        createdAt: { $gte: cacheCutoff },
-      }).sort({ createdAt: -1 })
+    const cachedSession = USE_POSTGRES
+      ? await findRecentSessionByFrameHash(frameHash, cacheCutoff)
       : null;
 
     if (cachedSession) {
@@ -165,9 +161,9 @@ app.post('/shop-frame', upload.single('frame'), async (req, res) => {
       results: result.results || [],
     };
 
-    if (USE_MONGO) {
-      Session.create(sessionPayload).catch((error) => {
-        console.error('[MongoDB] Failed to store session:', error);
+    if (USE_POSTGRES) {
+      createSession(sessionPayload).catch((error) => {
+        console.error('[Postgres] Failed to store session:', error);
       });
     }
 
@@ -249,95 +245,10 @@ app.get('/insights', async (req, res) => {
   const limit = 10;
 
   try {
-    const [
-      topDetectedCategories,
-      topClickedCategories,
-      topItemQueries,
-      ctrByCategory,
-      latencyStats,
-    ] = await Promise.all([
-      Event.aggregate([
-        { $match: { type: 'item_impression', createdAt: { $gte: since }, itemCategory: { $exists: true, $ne: null } } },
-        { $group: { _id: '$itemCategory', count: { $sum: 1 } } },
-        { $sort: { count: -1 } },
-        { $limit: limit },
-      ]),
-      Event.aggregate([
-        { $match: { type: 'product_click', createdAt: { $gte: since }, itemCategory: { $exists: true, $ne: null } } },
-        { $group: { _id: '$itemCategory', count: { $sum: 1 } } },
-        { $sort: { count: -1 } },
-        { $limit: limit },
-      ]),
-      Session.aggregate([
-        { $match: { createdAt: { $gte: since } } },
-        { $unwind: '$results' },
-        { $match: { 'results.item.query': { $exists: true, $ne: '' } } },
-        { $group: { _id: '$results.item.query', count: { $sum: 1 } } },
-        { $sort: { count: -1 } },
-        { $limit: limit },
-      ]),
-      Event.aggregate([
-        { $match: { createdAt: { $gte: since }, itemCategory: { $exists: true, $ne: null } } },
-        {
-          $group: {
-            _id: '$itemCategory',
-            impressions: { $sum: { $cond: [{ $eq: ['$type', 'item_impression'] }, 1, 0] } },
-            clicks: { $sum: { $cond: [{ $eq: ['$type', 'product_click'] }, 1, 0] } },
-          },
-        },
-        {
-          $project: {
-            _id: 0,
-            category: '$_id',
-            impressions: 1,
-            clicks: 1,
-            ctr: {
-              $cond: [
-                { $gt: ['$impressions', 0] },
-                { $divide: ['$clicks', '$impressions'] },
-                0,
-              ],
-            },
-          },
-        },
-        { $sort: { ctr: -1 } },
-        { $limit: limit },
-      ]),
-      Event.aggregate([
-        { $match: { type: 'shop_frame_latency', createdAt: { $gte: since }, latencyMs: { $type: 'number' } } },
-        {
-          $group: {
-            _id: null,
-            p50: { $percentile: { input: '$latencyMs', p: [0.5], method: 'approximate' } },
-            p95: { $percentile: { input: '$latencyMs', p: [0.95], method: 'approximate' } },
-          },
-        },
-        {
-          $project: {
-            _id: 0,
-            p50: { $arrayElemAt: ['$p50', 0] },
-            p95: { $arrayElemAt: ['$p95', 0] },
-          },
-        },
-      ]),
-    ]);
-
+    const insights = await getInsights(since, limit);
     res.json({
       windowDays: 7,
-      topDetectedCategories: topDetectedCategories.map((entry) => ({
-        category: entry._id,
-        count: entry.count,
-      })),
-      topClickedCategories: topClickedCategories.map((entry) => ({
-        category: entry._id,
-        count: entry.count,
-      })),
-      topItemQueries: topItemQueries.map((entry) => ({
-        query: entry._id,
-        count: entry.count,
-      })),
-      ctrByCategory,
-      latencyStats: latencyStats[0] || { p50: null, p95: null },
+      ...insights,
     });
   } catch (error) {
     console.error('Insights error:', error);
@@ -367,13 +278,13 @@ app.use((err, req, res, next) => {
   });
 });
 
-if (!USE_MONGO) {
-  console.log('[MongoDB] disabled via USE_MONGO=false');
+if (!USE_POSTGRES) {
+  console.log('[Postgres] disabled via USE_POSTGRES=false');
   app.listen(PORT, () => {
     console.log(`Server running on http://localhost:${PORT}`);
   });
 } else {
-  connectMongo()
+  connectPostgres()
     .then(() => {
       app.listen(PORT, () => {
         console.log(`Server running on http://localhost:${PORT}`);
