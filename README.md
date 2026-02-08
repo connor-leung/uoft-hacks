@@ -25,8 +25,10 @@ npm install
 Create `backend/.env`:
 ```bash
 GEMINI_API_KEY=your_gemini_api_key
-# MongoDB Atlas
-MONGODB_URI=mongodb+srv://<user>:<password>@cluster.mongodb.net/your_db
+# PostgreSQL
+DATABASE_URL=postgres://<user>:<password>@<host>:5432/<database>
+# Optional, set to false if your local Postgres does not use SSL
+# PGSSL=false
 # Optional: use real Shopify catalog search
 SHOPIFY_CLIENT_ID=your_shopify_client_id
 SHOPIFY_CLIENT_SECRET=your_shopify_client_secret
@@ -52,8 +54,8 @@ The extension calls `http://localhost:3000/shop-frame` and expects the backend t
 - `POST /health` -> `{ ok: true }`
 - `POST /shop-frame` -> `multipart/form-data` with `image` field
 
-## MongoDB
-The backend stores sessions and events in MongoDB using Mongoose. Ensure `MONGODB_URI` is set.
+## PostgreSQL
+The backend stores sessions, events, and analytics events in PostgreSQL. Ensure `DATABASE_URL` is set.
 
 ### Example documents
 Session

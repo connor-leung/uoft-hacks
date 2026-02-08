@@ -1,0 +1,38 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: shop-the-frame
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: shop-the-frame
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: shop-the-frame-backend
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      PORT: 3000
+      DATABASE_URL: postgresql://postgres:postgres@postgres:5432/shop-the-frame
+      PGSSL: "false"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    ports:
+      - "3000:3000"
+
+volumes:
+  postgres_data:

@@ -3,13 +3,19 @@
 
 import { searchProducts } from './catalogClient.js';
 
-const USE_MOCK = process.env.SHOPIFY_USE_MOCK === 'true' ||
-  (!process.env.SHOPIFY_CLIENT_ID || !process.env.SHOPIFY_CLIENT_SECRET);
+const FORCE_MOCK = process.env.SHOPIFY_USE_MOCK === 'true';
+const ALLOW_MOCK_FALLBACK = process.env.SHOPIFY_FALLBACK_TO_MOCK === 'true';
+const HAS_SHOPIFY_CREDS = Boolean(process.env.SHOPIFY_CLIENT_ID && process.env.SHOPIFY_CLIENT_SECRET);
 
 export async function searchShopifyCatalog(query, limit = 5) {
-  if (USE_MOCK) {
-    console.log(`[Shopify] Using mock data (set SHOPIFY_CLIENT_ID/SECRET to use real API)`);
+  if (FORCE_MOCK) {
+    console.log('[Shopify] Using mock data (SHOPIFY_USE_MOCK=true)');
     return searchMock(query, limit);
+  }
+
+  if (!HAS_SHOPIFY_CREDS) {
+    console.warn('[Shopify] Missing credentials; returning no products');
+    return { query, products: [] };
   }
 
   try {
@@ -33,8 +39,12 @@ export async function searchShopifyCatalog(query, limit = 5) {
       products: transformed,
     };
   } catch (error) {
-    console.error(`[Shopify] API error, falling back to mock:`, error.message);
-    return searchMock(query, limit);
+    if (ALLOW_MOCK_FALLBACK) {
+      console.error(`[Shopify] API error, falling back to mock:`, error.message);
+      return searchMock(query, limit);
+    }
+    console.error('[Shopify] API error; returning no products:', error.message);
+    return { query, products: [] };
   }
 }
 
